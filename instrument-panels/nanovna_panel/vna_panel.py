@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel,
                              QVBoxLayout, QGridLayout, QComboBox, QFileDialog, QMessageBox,
                              QInputDialog, QDialog, QPlainTextEdit, QPushButton, QSizePolicy)
 
-from vna_device import VNAWorker, list_ports, SIM_PORT, FMIN, FMAX
+from vna_device import VNAWorker, list_ports, SIM_PORT, MODELS, DEFAULT_MODEL
 from vna_cal import Calibration, interp_c
 from vna_widgets import PanelButton, Knob, PowerBar, PortConnector, ClickFrame, DPadCenter
 
@@ -243,7 +243,8 @@ QPushButton#preset { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ff
     border:1px solid #a88a0c; border-radius:5px; color:#7a1010; font: bold 9pt "Segoe UI"; min-height:24px; min-width:62px; }
 QPushButton#dpad { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffffff, stop:1 #d0d5db);
     border:1px solid #6f7782; border-radius:6px; color:#222; font: 12pt "Segoe UI"; min-width:36px; min-height:30px; }
-QComboBox { background:white; border:1px solid #8995a6; border-radius:3px; padding:1px 6px; font: 9pt "Segoe UI"; min-width:120px; }
+QComboBox { background:white; color:#1e2530; border:1px solid #8995a6; border-radius:3px; padding:1px 6px; font: 9pt "Segoe UI"; min-width:120px; }
+QComboBox QAbstractItemView { background:white; color:#1e2530; selection-background-color:#2f7de1; selection-color:white; }
 #lowerPanel { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #d9dce0, stop:1 #c8ccd2);
               border:1px solid #b2b8c0; border-radius:6px; }
 #small { color:#3c4a5e; font: 8pt "Segoe UI"; }
@@ -368,12 +369,15 @@ class VNAPanel(QMainWindow):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.setWindowTitle(APP_NAME)
+        self.model = DEFAULT_MODEL
+        self.fmin, self.fmax = MODELS[self.model]["fmin"], MODELS[self.model]["fmax"]
+        self.setWindowTitle(MODELS[self.model]["title"])
         self.worker = None
         self.is_sim = False
 
         # channel state
-        self.start, self.stop, self.points = 1e6, 3e9, 201
+        self.start, self.stop = MODELS[self.model]["preset"]
+        self.points = 201
         self.chunk = 201
         self.running = True
         self.avg_on, self.avg_n, self.avg_count = False, 16, 0
@@ -451,12 +455,14 @@ class VNAPanel(QMainWindow):
         top = QHBoxLayout()
         b = QLabel("NanoVNA")
         b.setObjectName("brand")
-        m = QLabel("-F V3")
+        m = QLabel(MODELS[self.model]["label"])
         m.setObjectName("model")
+        self.model_lbl = m
         t = QLabel("      Vector Network Analyzer      ")
         t.setObjectName("tag")
-        r = QLabel("1MHz-6GHz")
+        r = QLabel(MODELS[self.model]["range"])
         r.setObjectName("range")
+        self.range_lbl = r
         for w in (b, m, t, r):
             top.addWidget(w)
         top.addStretch(1)
@@ -490,6 +496,15 @@ class VNAPanel(QMainWindow):
         rb.clicked.connect(self.refresh_ports)
         row.addWidget(rb)
         col.addLayout(row)
+        l2 = QLabel("Model")
+        l2.setObjectName("small")
+        col.addWidget(l2)
+        self.model_combo = QComboBox()
+        self.model_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.model_combo.addItems(list(MODELS))
+        self.model_combo.setCurrentText(self.model)
+        self.model_combo.currentTextChanged.connect(self.set_model)
+        col.addWidget(self.model_combo)
         col.addStretch(1)
         ll.addLayout(col)
         ll.addStretch(1)
@@ -816,7 +831,7 @@ class VNAPanel(QMainWindow):
 
         M = {}
         M["FREQ"] = ("Frequency", [prm("Start", "start"), prm("Stop", "stop"), prm("Center", "center"),
-                                   prm("Span", "span"), act("Full Span", lambda: self.set_range(FMIN, FMAX))])
+                                   prm("Span", "span"), act("Full Span", lambda: self.set_range(self.fmin, self.fmax))])
         M["AVG"] = ("Average / BW", [tog("Averaging", lambda: self.avg_on, self.set_avg_on), prm("Avg Factor", "avg"),
                                      act("Avg Restart", self.restart_avg, value=lambda: "%d/%d" % (self.avg_count, self.avg_n)),
                                      tog("Smoothing", lambda: T().smooth, self.set_smooth), prm("Smo Aperture", "aperture"),
@@ -1121,11 +1136,11 @@ class VNAPanel(QMainWindow):
         return v
 
     def set_range(self, a, b):
-        a = max(FMIN, min(a, FMAX))
-        b = max(FMIN, min(b, FMAX))
+        a = max(self.fmin, min(a, self.fmax))
+        b = max(self.fmin, min(b, self.fmax))
         if b - a < 10e3:
             c = (a + b) / 2
-            a, b = max(FMIN, c - 5e3), max(FMIN, c - 5e3) + 10e3
+            a, b = max(self.fmin, c - 5e3), max(self.fmin, c - 5e3) + 10e3
         self.start, self.stop = a, b
         self.push_sweep()
 
@@ -1591,6 +1606,20 @@ class VNAPanel(QMainWindow):
         i = self.port_combo.findData(cur) if cur else -1
         self.port_combo.setCurrentIndex(i if i >= 0 else max(best, 0))
 
+    def set_model(self, name):
+        if name not in MODELS:
+            return
+        m = MODELS[name]
+        self.model = name
+        self.fmin, self.fmax = m["fmin"], m["fmax"]
+        self.model_lbl.setText(m["label"])
+        self.range_lbl.setText(m["range"])
+        self.setWindowTitle(m["title"])
+        if self.worker:
+            self.worker.screen = m["screen"]
+        self.set_range(*m["preset"])
+        self.flash("Model: %s  (%s)" % (name, m["range"]))
+
     def toggle_connect(self):
         if self.worker:
             self.disconnect_device()
@@ -1602,7 +1631,7 @@ class VNAPanel(QMainWindow):
             return
         port = self.port_combo.currentData()
         self.is_sim = port == SIM_PORT
-        w = VNAWorker(port)
+        w = VNAWorker(port, MODELS[self.model]["screen"])
         w.sweep_ready.connect(self.on_sweep)
         w.connected.connect(self.on_connected)
         w.disconnected.connect(self.on_disconnected)
@@ -1749,7 +1778,7 @@ class VNAPanel(QMainWindow):
         if not fn:
             return
         with open(fn, "w") as fh:
-            fh.write("! NanoVNA-F V3 Front Panel  %s  correction=%s %s\n" %
+            fh.write("! " + MODELS[self.model]["title"] + "  %s  correction=%s %s\n" %
                      (datetime.datetime.now().isoformat(timespec="seconds"), self.correction,
                       self.cal.kind() if self.correction == "App" else ""))
             if ports == 2:
@@ -2026,7 +2055,7 @@ class VNAPanel(QMainWindow):
         self.avg_on = False
         self.set_running(True)
         self.relayout()
-        self.set_range(1e6, 3e9)
+        self.set_range(*MODELS[self.model]["preset"])
         self.set_points(201)
         self.open_menu("FREQ")
         self.flash("Preset (app calibration kept)")
