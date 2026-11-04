@@ -24,8 +24,14 @@ except ImportError:  # pragma: no cover
 ST_VID, ST_PID = 0x0483, 0x5740
 PROMPT = b"ch> "
 SIM_PORT = "Simulator"
-FMIN, FMAX = 1e6, 6e9
-SCREEN = (800, 480)
+# Per-model settings (selected from the Model dropdown in vna_panel.py)
+MODELS = {
+    "NanoVNA-F V3": dict(label="-F V3", range="1MHz-6GHz", title="NanoVNA-F V3 Front Panel",
+                         fmin=1e6, fmax=6e9, screen=(800, 480), preset=(1e6, 3e9)),
+    "NanoVNA-H4":   dict(label="-H4", range="50kHz-1.5GHz", title="NanoVNA-H4 Front Panel",
+                         fmin=50e3, fmax=1.5e9, screen=(480, 320), preset=(1e6, 1.5e9)),
+}
+DEFAULT_MODEL = "NanoVNA-H4"      # model selected at startup (edit to "NanoVNA-F V3" if preferred)
 
 
 class PointsError(Exception):
@@ -299,9 +305,10 @@ class VNAWorker(QThread):
     reply = pyqtSignal(int, object)
     status = pyqtSignal(str)
 
-    def __init__(self, port):
+    def __init__(self, port, screen=(800, 480)):
         super().__init__()
         self.port = port
+        self.screen = screen   # device LCD size for the capture command
         self.q = queue.Queue()
         self.lock = threading.Lock()
         self.sweep = (1e6, 1.5e9, 201)
@@ -341,7 +348,7 @@ class VNAWorker(QThread):
                 if kind == "cmd":
                     r = tr.command(arg)
                 else:
-                    w, h = SCREEN
+                    w, h = self.screen
                     r = (w, h, tr.capture(w, h))
                 if token is not None:
                     self.reply.emit(token, r)
