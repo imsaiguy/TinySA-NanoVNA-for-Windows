@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
     serial = None
 
 ST_VID, ST_PID = 0x0483, 0x5740
-PROMPT = b"ch> "
+PROMPT = b"ch>"
 SIM_PORT = "Simulator"
 FMIN, FMAX = 1e6, 6e9
 SCREEN = (800, 480)
